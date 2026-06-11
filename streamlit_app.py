@@ -1,19 +1,19 @@
 import streamlit as st
 from src.search import RAGSearch
 
-# ------------------------------------------------
-# PAGE CONFIG
-# ------------------------------------------------
+# -------------------------
+# Page Config
+# -------------------------
 
 st.set_page_config(
-    page_title="RAG Document Assistant",
-    page_icon="📚",
+    page_title="RAG Chatbot",
+    page_icon="🤖",
     layout="wide"
 )
 
-# ------------------------------------------------
-# LOAD RAG SYSTEM ONCE
-# ------------------------------------------------
+# -------------------------
+# Load RAG
+# -------------------------
 
 @st.cache_resource
 def load_rag():
@@ -25,84 +25,66 @@ def load_rag():
 
 rag = load_rag()
 
-# ------------------------------------------------
-# SESSION STATE
-# ------------------------------------------------
+# -------------------------
+# Session State
+# -------------------------
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# ------------------------------------------------
-# SIDEBAR
-# ------------------------------------------------
+# -------------------------
+# Sidebar
+# -------------------------
 
 with st.sidebar:
 
-    st.title("⚙️ System Information")
+    st.title("⚙️ System Info")
 
-    st.markdown("### Current Model")
+    st.write("**Model:**")
     st.success("mistral:latest")
 
-    st.markdown("### Indexed Chunks")
+    st.write("**Embedding Model:**")
+    st.info("all-MiniLM-L6-v2")
 
     try:
         chunk_count = len(rag.vectorstore.metadata)
     except:
         chunk_count = 0
 
-    st.info(f"{chunk_count} Chunks")
+    st.write("**Indexed Chunks:**")
+    st.success(chunk_count)
 
-    st.markdown("---")
+    st.divider()
 
     if st.button("🗑 Clear Chat"):
-
         st.session_state.messages = []
-
         st.rerun()
 
-# ------------------------------------------------
-# HEADER
-# ------------------------------------------------
+# -------------------------
+# Header
+# -------------------------
 
-st.title("📚 Document Chat Assistant")
+st.title("📚 RAG Document Assistant")
+st.caption("Ask questions about your PDF document")
 
-st.markdown(
-    """
-Ask questions about your PDF document.
-
-Features:
-- Semantic Search (FAISS)
-- Local LLM (Ollama)
-- Source References
-- Chat History
-"""
-)
-
-# ------------------------------------------------
-# SHOW CHAT HISTORY
-# ------------------------------------------------
+# -------------------------
+# Show Chat History
+# -------------------------
 
 for msg in st.session_state.messages:
 
     with st.chat_message(msg["role"]):
-
         st.markdown(msg["content"])
 
-# ------------------------------------------------
-# USER INPUT
-# ------------------------------------------------
+# -------------------------
+# Chat Input
+# -------------------------
 
 query = st.chat_input(
-    "Ask a question about the document..."
+    "Ask a question..."
 )
 
-# ------------------------------------------------
-# PROCESS QUESTION
-# ------------------------------------------------
-
 if query:
-
-    # Show user message
 
     st.session_state.messages.append(
         {
@@ -112,25 +94,50 @@ if query:
     )
 
     with st.chat_message("user"):
-
         st.markdown(query)
-
-    # Assistant response
 
     with st.chat_message("assistant"):
 
-        # -----------------------------
-        # Retrieve source chunks
-        # -----------------------------
+        response_placeholder = st.empty()
 
-        results = rag.vectorstore.query(
+        answer = rag.search_and_summarize(
             query=query,
             top_k=8
         )
 
-        texts = []
+        full_response = ""
 
-        for result in results:
+        for word in answer.split():
+
+            full_response += word + " "
+
+            response_placeholder.markdown(
+                full_response + "▌"
+            )
+
+        response_placeholder.markdown(
+            full_response
+        )
+
+    st.session_state.messages.append(
+        {
+            "role": "assistant",
+            "content": full_response
+        }
+    )
+
+    # -------------------------
+    # Sources
+    # -------------------------
+
+    results = rag.vectorstore.query(
+        query,
+        top_k=8
+    )
+
+    with st.expander("📄 Source Chunks"):
+
+        for i, result in enumerate(results, start=1):
 
             metadata = result.get(
                 "metadata",
@@ -142,110 +149,17 @@ if query:
                 ""
             )
 
-            if text:
-
-                texts.append(text)
-
-        context = "\n\n".join(texts)
-
-        # -----------------------------
-        # Same prompt as your backend
-        # -----------------------------
-
-        prompt = f"""
-You are a document question-answering assistant.
-
-Answer the user's question directly using only the context.
-
-Do NOT summarize the entire context.
-
-Extract only the information that answers the question.
-
-If the question is broad, provide a concise answer.
-
-If the answer is not found, say:
-"I could not find that information in the document."
-
-Question:
-{query}
-
-Context:
-{context}
-
-Answer:
-"""
-
-        # -----------------------------
-        # STREAMING RESPONSE
-        # -----------------------------
-
-        answer_box = st.empty()
-
-        full_response = ""
-
-        try:
-
-            for chunk in rag.llm.stream(prompt):
-
-                token = chunk.content
-
-                if token:
-
-                    full_response += token
-
-                    answer_box.markdown(
-                        full_response + "▌"
-                    )
-
-            answer_box.markdown(
-                full_response
+            st.markdown(
+                f"### Chunk {i}"
             )
 
-        except Exception:
+            st.write(text[:1000])
 
-            response = rag.llm.invoke(prompt)
+            st.divider()
 
-            full_response = response.content
-
-            answer_box.markdown(
-                full_response
-            )
-
-        # -----------------------------
-        # Save chat
-        # -----------------------------
-
-        st.session_state.messages.append(
-            {
-                "role": "assistant",
-                "content": full_response
-            }
-        )
-
-        # -----------------------------
-        # Show Sources
-        # -----------------------------
-
-        with st.expander(
-            "📄 Source Passages Used"
-        ):
-
-            for i, text in enumerate(
-                texts,
-                start=1
-            ):
-
-                st.markdown(
-                    f"### Source Chunk {i}"
-                )
-
-                st.write(text)
-
-                st.divider()
-
-# ------------------------------------------------
-# FOOTER
-# ------------------------------------------------
+# -------------------------
+# Footer
+# -------------------------
 
 st.markdown("---")
 
